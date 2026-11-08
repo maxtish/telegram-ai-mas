@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Пользователь Telegram
+model User {
+  id           BigInt    @id // telegram_user_id
+  username     String?
+  firstName    String?
+  languageCode String?   @default("ru")
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  persona      Persona?
+  messages     Message[]
+  vocabulary   Vocabulary[]
+}
+
+// Уникальная личность бота, сгенерированная для конкретного пользователя
+model Persona {
+  id               Int      @id @default(autoincrement())
+  userId           BigInt   @unique
+  name             String   // Имя бота (например, "Hans")
+  age              Int
+  profession       String
+  city             String   // Город в Германии
+  hobbies          String[] // Массив хобби
+  communicationStyle String // Инструкция для промпта (как общаться)
+  createdAt        DateTime @default(now())
+
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// История переписки
+model Message {
+  id        Int      @id @default(autoincrement())
+  userId    BigInt
+  sender    SenderRole
+  content   String   @db.Text
+  mediaUrl  String?  // Если отправлено фото или аудио
+  createdAt DateTime @default(now())
+
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+// Словарь для ИИ-Учителя (анализ ошибок и успехов)
+model Vocabulary {
+  id          Int      @id @default(autoincrement())
+  userId      BigInt
+  wordOrRule  String   // Немецкое слово или грамматическое правило
+  status      String   // "needs_practice", "mastered"
+  notes       String?  // Заметка Учителя (например, "путает артикль")
+  updatedAt   DateTime @updatedAt
+
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+enum SenderRole {
+  USER
+  BOT
+}
