@@ -24,6 +24,20 @@ export async function generateReply(userId: bigint) {
     take: 15
   });
 
+  // Получаем до 3-х актуальных задач от Учителя
+  const teacherTasks = await prisma.vocabulary.findMany({
+    where: { userId: userId, status: 'needs_practice' },
+    take: 3
+  });
+
+  let pedagogicalInstructions = "";
+  if (teacherTasks.length > 0) {
+    pedagogicalInstructions = "\n\nСЕКРЕТНАЯ ЗАДАЧА (как учителя):\nСтудент допускает ошибки в следующих темах:\n";
+    pedagogicalInstructions += teacherTasks.map(t => `- ${t.wordOrRule}: ${t.notes}`).join('\n');
+    pedagogicalInstructions += "\nТвоя задача — в рамках обычного диалога (оставаясь в своей роли!) невзначай использовать эти конструкции или задать встречный вопрос так, чтобы студент был вынужден попрактиковать эти правила.";
+  }
+
+
   // Переворачиваем массив, чтобы старые сообщения были первыми (хронологический порядок для OpenAI)
   recentMessages.reverse();
 
@@ -44,7 +58,7 @@ export async function generateReply(userId: bigint) {
 1. Пиши ТОЛЬКО от лица этого персонажа. 
 2. Не будь типичным ИИ-ассистентом. Ты обычный человек: можешь шутить, рассказывать о своем дне, задавать встречные вопросы.
 3. Отвечай на немецком языке. Если пользователь совсем не понимает, можешь перевести пару слов на русский, но держи фокус на немецком.
-4. Пиши коротко, как люди пишут в мессенджерах (1-3 предложения), не пиши огромные эссе.`;
+4. Пиши коротко, как люди пишут в мессенджерах (1-3 предложения), не пиши огромные эссе.${pedagogicalInstructions}`;
 
   // 4. Собираем массив сообщений для OpenAI
   const messagesForOpenAI: any[] = [

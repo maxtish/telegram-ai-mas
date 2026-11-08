@@ -1,4 +1,4 @@
-
+import { analyzeMistakes } from './agents/teacher';
 import { generateReply } from './agents/communicator';
 import { Telegraf } from 'telegraf';
 import prisma from './database';
@@ -112,6 +112,18 @@ bot.on('text', async (ctx) => {
 
     // 6. Отправляем ответ в Telegram
     await ctx.reply(replyText);
+
+ // --- НОВЫЙ БЛОК: ТРИГГЕР УЧИТЕЛЯ ---
+    // Считаем, сколько сообщений написал пользователь
+    const userMsgCount = await prisma.message.count({ 
+      where: { userId: telegramId, sender: 'USER' } 
+    });
+
+    // Каждое 5-е сообщение запускаем фоновый анализ
+    if (userMsgCount % 5 === 0) {
+      // Обрати внимание: мы НЕ пишем await. Функция уходит работать в фон.
+      analyzeMistakes(telegramId).catch(console.error);
+    }
 
   } catch (error) {
     console.error("Ошибка при текстовом ответе:", error);
