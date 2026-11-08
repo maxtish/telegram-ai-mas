@@ -32,7 +32,7 @@ export async function evaluateInbox(userId: bigint) {
   const timeString = now.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
   const dayOfWeek = now.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long' });
 
-  const prompt = `Ты диспетчер сообщений.
+const prompt = `Ты диспетчер сообщений.
 Собеседник (Бот): Имя ${persona.name}, профессия ${persona.profession}.
 Текущее время в Германии: ${timeString}, ${dayOfWeek}.
 
@@ -42,7 +42,10 @@ ${inboxText}
 Оцени ситуацию и выбери одно из действий.
 ПРАВИЛА:
 1. Если в сообщениях есть вопрос, новая тема или мысль, требующая ответа -> "reply_now".
-2. Если бот сейчас должен быть на работе или глубокая ночь -> "delay".
+2. РЕЖИМ СНА И ОТДЫХА:
+   - Вечер (вплоть до 00:00) — это нормальное время для общения. НЕ уходи в спячку, смело отвечай ("reply_now").
+   - Если сейчас глубокая ночь (с 00:00 до 08:00) или бот точно на работе -> "delay" (в поле "delayMinutes" укажи минимум 30).
+   - ИСКЛЮЧЕНИЕ (НАСТОЙЧИВОСТЬ): Если сейчас ночь/работа, НО пользователь написал 2 или более сообщений подряд, значит он очень хочет пообщаться — "просыпайся" и отвечай ("reply_now").
 3. Если пользователь попросил подождать ("момент", "щас", "секунду") -> "user_busy".
 4. Если вся эта серия сообщений — это просто "Ок", "Ага" или смайлик без вопросов -> "ignore".
 5. НОВОЕ ПРАВИЛО (ЯЗЫК): Если пользователь пишет на РУССКОМ языке:
@@ -55,7 +58,6 @@ ${inboxText}
   "delayMinutes": 0,
   "reason": "Кратко объясни причину"
 }`;
-
   const completion = await openai.chat.completions.create({
     model: "gpt-4o-mini",
     messages: [{ role: "system", content: prompt }],
