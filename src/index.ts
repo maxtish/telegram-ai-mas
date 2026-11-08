@@ -1,5 +1,5 @@
 
-
+import { generateReply } from './agents/communicator';
 import { Telegraf } from 'telegraf';
 import prisma from './database';
 import { generatePersona } from './agents/persona';
@@ -66,6 +66,59 @@ bot.start(async (ctx) => {
     ctx.reply("Ой, что-то пошло не так. Попробуй еще раз чуть позже.");
   }
 });
+
+// Обработчик всех текстовых сообщений
+bot.on('text', async (ctx) => {
+  const telegramId = BigInt(ctx.from.id);
+  const text = ctx.message.text;
+
+  // Игнорируем команды (например /start)
+  if (text.startsWith('/')) return;
+
+  try {
+    // 1. Проверяем, есть ли пользователь и персона в базе
+    const user = await prisma.user.findUnique({
+      where: { id: telegramId },
+      include: { persona: true }
+    });
+
+    if (!user || !user.persona) {
+      return ctx.reply("Для начала напиши /start, чтобы я настроился на общение!");
+    }
+
+    // 2. Показываем статус "печатает..." в Telegram (для реализма)
+    await ctx.sendChatAction('typing');
+
+    // 3. Сохраняем сообщение пользователя в базу данных
+    await prisma.message.create({
+      data: {
+        userId: telegramId,
+        sender: 'USER',
+        content: text
+      }
+    });
+
+    // 4. Вызываем агента-Коммуникатора (он сам заберет историю из БД)
+    const replyText = await generateReply(telegramId);
+
+    // 5. Сохраняем ответ бота в БД
+    await prisma.message.create({
+      data: {
+        userId: telegramId,
+        sender: 'BOT',
+        content: replyText
+      }
+    });
+
+    // 6. Отправляем ответ в Telegram
+    await ctx.reply(replyText);
+
+  } catch (error) {
+    console.error("Ошибка при текстовом ответе:", error);
+    ctx.reply("Прости, у меня тут связь барахлит. Можешь повторить?");
+  }
+});
+
 
 // Запускаем бота
 bot.launch(() => {
