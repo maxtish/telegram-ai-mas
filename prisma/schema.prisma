@@ -9,10 +9,11 @@ datasource db {
 
 // Пользователь Telegram
 model User {
-  id           BigInt    @id // telegram_user_id
+  id           BigInt    @id
   username     String?
   firstName    String?
   languageCode String?   @default("ru")
+  botState     String    @default("IDLE")
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -52,9 +53,12 @@ model Message {
 model Vocabulary {
   id          Int      @id @default(autoincrement())
   userId      BigInt
-  wordOrRule  String   // Немецкое слово или грамматическое правило
-  status      String   // "needs_practice", "mastered"
-  notes       String?  // Заметка Учителя (например, "путает артикль")
+  wordOrRule  String   
+  translation String?  // <-- НОВОЕ: Перевод
+  status      String   
+  notes       String?  
+  score       Int      @default(0) 
+  nextReview  DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
