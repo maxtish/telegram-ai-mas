@@ -131,6 +131,56 @@ bot.command('fixdb', async (ctx) => {
 });
 
 
+// --- КОМАНДА: УДАЛИТЬ СЛОВО ПО НОМЕРУ ---
+bot.command('del', async (ctx) => {
+  const telegramId = BigInt(ctx.from.id);
+  const args = ctx.message.text.split(' ');
+  
+  if (args.length < 2) {
+    return ctx.reply("Напиши команду и номер слова из списка. Например: /del 5");
+  }
+
+  const num = parseInt(args[1]);
+  if (isNaN(num) || num < 1) {
+    return ctx.reply("Укажи правильный номер слова.");
+  }
+
+  // Получаем список в том же порядке, в каком он выводится в "Моем словаре"
+  const words = await prisma.vocabulary.findMany({
+    where: { userId: telegramId, translation: { not: null } },
+    orderBy: { id: 'asc' }
+  });
+
+  if (num > words.length) {
+    return ctx.reply(`В словаре нет такого номера. Всего слов: ${words.length}.`);
+  }
+
+  // Находим нужное слово (индекс в массиве на 1 меньше номера)
+  const wordToDelete = words[num - 1];
+
+  await prisma.vocabulary.delete({ where: { id: wordToDelete.id } });
+  
+  return ctx.reply(`🗑 Слово <b>${wordToDelete.wordOrRule}</b> успешно удалено!`, { parse_mode: 'HTML' });
+});
+
+// --- КОМАНДА: ОЧИСТИТЬ СЛОВАРЬ ---
+bot.command('clear_dict', async (ctx) => {
+  const telegramId = BigInt(ctx.from.id);
+  
+  // Удаляем только словарные слова (не трогаем грамматические правила от Teacher)
+  const deleted = await prisma.vocabulary.deleteMany({
+    where: { 
+      userId: telegramId,
+      translation: { not: null }
+    }
+  });
+
+  return ctx.reply(`🌪 Словарь полностью очищен! Удалено слов: ${deleted.count}.`, mainMenu);
+});
+
+
+
+
 
 // --- ОБРАБОТЧИК ВСЕГО ОСТАЛЬНОГО ТЕКСТА ---
 
@@ -170,11 +220,13 @@ bot.on('text', async (ctx) => {
 
       let responseText = "📚 <b>Твой словарь:</b>\n\n";
       
-      words.forEach((w, index) => {
-        // Выводим с прогрессом изучения (от 0 до 5)
+    words.forEach((w, index) => {
         const progress = '🟢'.repeat(w.score) + '⚪'.repeat(5 - w.score);
         responseText += `${index + 1}. 🇩🇪 <b>${w.wordOrRule}</b> — 🇷🇺 ${w.translation} <i>[${progress}]</i>\n`;
       });
+
+      // Подсказка по командам
+      responseText += `\n<i>💡 Чтобы удалить слово, напиши <b>/del номер</b> (например, /del 1).\nОчистить весь словарь: <b>/clear_dict</b></i>`;
 
       // Защита от лимита Telegram (4096 символов). Разбиваем текст на части.
       const maxLength = 3900;
