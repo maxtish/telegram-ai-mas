@@ -26,6 +26,8 @@ const worker = new Worker('message-queue', async (job) => {
     return;
   }
 
+
+
   // --- НОВОЕ: АВТО-КВИЗ (Проверка слов) ---
   if (type === 'hourly-quiz') {
     console.log(`[Quiz] 🧠 Запуск ежечасной проверки слов...`);
@@ -82,6 +84,79 @@ const worker = new Worker('message-queue', async (job) => {
     return; // Завершаем задачу
   }
   // ------------------------------------------
+
+// --- НОВОЕ: ПИНГ НЕАКТИВНОСТИ (Прошло 5 часов без ответа) ---
+  if (type === 'inactivity-ping') {
+    console.log(`[Ping] Проверяю чаты на долгое молчание...`);
+    const users = await prisma.user.findMany({ include: { persona: true } });
+    
+    for (const u of users) {
+      if (u.botState !== 'IDLE' || !u.persona) continue; // Не трогаем, если юзер на экзамене
+
+      // Берем последние 10 сообщений для контекста
+      const recentMessages = await prisma.message.findMany({
+        where: { userId: u.id },
+        orderBy: { createdAt: 'desc' },
+        take: 10
+      });
+
+      if (recentMessages.length === 0) continue;
+
+      const lastMsg = recentMessages[0];
+      
+      // Нас интересует только ситуация, когда ПОСЛЕДНИМ написал БОТ, а юзер молчит
+      if (lastMsg.sender !== 'BOT') continue;
+
+      const hoursPassed = (Date.now() - lastMsg.createdAt.getTime()) / (1000 * 60 * 60);
+      
+      // Ловим окно ровно между 5 и 6 часами молчания, чтобы бот написал ровно 1 раз, а не спамил каждый час
+      if (hoursPassed >= 5 && hoursPassed < 6) {
+        console.log(`[Ping] Пользователь ${u.id} молчит 5 часов. Генерируем вовлекающее сообщение.`);
+        
+        // Собираем историю диалога для анализа
+        const chatHistory = recentMessages.reverse().map(m => `${m.sender === 'BOT' ? u.persona?.name : 'Пользователь'}: ${m.content}`).join('\n');
+
+        const prompt = `Ты человек из Германии (Бавария). Имя: ${u.persona.name}, профессия: ${u.persona.profession}.
+Твой собеседник не отвечает на твое последнее сообщение уже 5 часов. 
+
+ТВОЯ ЗАДАЧА:
+Написать ОДНО короткое сообщение (2-3 предложения), чтобы сменить тему и снова вовлечь его в разговор.
+Сделай анализ истории переписки, чтобы понять, чем он увлекается (хобби, работа, интересы).
+
+Выбери ОДИН из вариантов:
+1. Поделись коротким интересным фактом из мира IT, технологий или инженерии.
+2. Расскажи забавный факт или новость о Баварии/Германии.
+3. Задай вопрос о его хобби, которое упоминалось в чате.
+
+ПРАВИЛА:
+- Не упрекай его за то, что он долго не отвечал.
+- Пиши на немецком языке (можно добавить 1-2 слова по-русски, если это уместно для юмора).
+- Будь дружелюбным и естественным.
+
+История последних сообщений для анализа:
+${chatHistory}`;
+
+        try {
+          const completion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            messages: [{ role: "system", content: prompt }]
+          });
+          
+          const replyText = completion.choices[0]?.message?.content;
+          
+          if (replyText) {
+            await prisma.message.create({ data: { userId: u.id, sender: 'BOT', content: replyText } });
+            await bot.telegram.sendMessage(Number(u.id), replyText);
+          }
+        } catch (e) {
+          console.error(`[Ping] Ошибка при генерации пинга:`, e);
+        }
+      }
+    }
+    return; // Завершаем задачу
+  }
+  // -------------------------------------------------------------
+
 
   // Если это не планировщик и не квиз, значит работаем с конкретным юзером
   if (!userId) return;
@@ -191,6 +266,14 @@ worker.on('ready', async () => {
     { pattern: '0 9-21 * * *', tz: 'Europe/Berlin' },
     { name: 'hourly-quiz', data: { type: 'hourly-quiz' } }
   );
+
+  // Проверка молчания (только днем с 10:00 до 22:00)
+  await messageQueue.upsertJobScheduler(
+    'inactivity-ping-scheduler',
+    { pattern: '0 10-22 * * *', tz: 'Europe/Berlin' }, // <-- ИЗМЕНИЛИ ЗДЕСЬ
+    { name: 'inactivity-ping', data: { type: 'inactivity-ping' } }
+  )
+
 
   console.log('[Worker] Планировщик дня и Экзаменатор успешно настроены!');
 });
