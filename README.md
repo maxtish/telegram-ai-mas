@@ -144,3 +144,6 @@ ai-bot/
 запуск в фоне 
 
 pm2 start npx --name "ai-bot" -- tsx src/index.ts
+
+
+pm2 restart ai-bot
