@@ -33,30 +33,30 @@ const worker = new Worker('message-queue', async (job) => {
     console.log(`[Quiz] 🧠 Запуск ежечасной проверки слов...`);
     // Ищем всех пользователей, которые сейчас ничем не заняты (IDLE)
     const users = await prisma.user.findMany({ where: { botState: 'IDLE' } });
-    
+
     for (const u of users) {
       // Проверяем, не переписывается ли он прямо сейчас (чтобы не перебить диалог)
       const lastMsg = await prisma.message.findFirst({
         where: { userId: u.id, sender: 'USER' },
         orderBy: { createdAt: 'desc' }
       });
-      
+
       if (lastMsg && (Date.now() - lastMsg.createdAt.getTime() < 15 * 60000)) {
         continue; // Общались меньше 15 минут назад, не отвлекаем
       }
 
       // Ищем слово, которое пора повторять (игнорируем правила грамматики)
       const word = await prisma.vocabulary.findFirst({
-        where: { 
-          userId: u.id, 
+        where: {
+          userId: u.id,
           nextReview: { lte: new Date() },
-          translation: { not: null } 
+          translation: { not: null }
         },
         orderBy: { nextReview: 'asc' }
       });
 
       if (word) {
-       // Переводим бота в режим проверки (мини-сессия на 1 слово)
+        // Переводим бота в режим проверки (мини-сессия на 1 слово)
         const sessionState = {
           type: 'QUIZ_SESSION',
           queue: [word.id],
@@ -70,9 +70,9 @@ const worker = new Worker('message-queue', async (job) => {
           where: { id: u.id },
           data: { botState: JSON.stringify(sessionState) }
         });
-        
+
         const text = `Минутка практики! 🤓\nПомнишь, как будет по-немецки: <b>${word.translation}</b>?`;
-        
+
         // Сохраняем вопрос в базу и отправляем
         await prisma.message.create({
           data: { userId: u.id, sender: 'BOT', content: text }
@@ -85,11 +85,11 @@ const worker = new Worker('message-queue', async (job) => {
   }
   // ------------------------------------------
 
-// --- НОВОЕ: ПИНГ НЕАКТИВНОСТИ (Прошло 5 часов без ответа) ---
+  // --- НОВОЕ: ПИНГ НЕАКТИВНОСТИ (Прошло 5 часов без ответа) ---
   if (type === 'inactivity-ping') {
     console.log(`[Ping] Проверяю чаты на долгое молчание...`);
     const users = await prisma.user.findMany({ include: { persona: true } });
-    
+
     for (const u of users) {
       if (u.botState !== 'IDLE' || !u.persona) continue; // Не трогаем, если юзер на экзамене
 
@@ -103,16 +103,16 @@ const worker = new Worker('message-queue', async (job) => {
       if (recentMessages.length === 0) continue;
 
       const lastMsg = recentMessages[0];
-      
+
       // Нас интересует только ситуация, когда ПОСЛЕДНИМ написал БОТ, а юзер молчит
       if (lastMsg.sender !== 'BOT') continue;
 
       const hoursPassed = (Date.now() - lastMsg.createdAt.getTime()) / (1000 * 60 * 60);
-      
+
       // Ловим окно ровно между 5 и 6 часами молчания, чтобы бот написал ровно 1 раз, а не спамил каждый час
       if (hoursPassed >= 5 && hoursPassed < 6) {
         console.log(`[Ping] Пользователь ${u.id} молчит 5 часов. Генерируем вовлекающее сообщение.`);
-        
+
         // Собираем историю диалога для анализа
         const chatHistory = recentMessages.reverse().map(m => `${m.sender === 'BOT' ? u.persona?.name : 'Пользователь'}: ${m.content}`).join('\n');
 
@@ -141,9 +141,9 @@ ${chatHistory}`;
             model: "gpt-4o-mini",
             messages: [{ role: "system", content: prompt }]
           });
-          
+
           const replyText = completion.choices[0]?.message?.content;
-          
+
           if (replyText) {
             await prisma.message.create({ data: { userId: u.id, sender: 'BOT', content: replyText } });
             await bot.telegram.sendMessage(Number(u.id), replyText);
@@ -165,27 +165,27 @@ ${chatHistory}`;
   // 2. ВХОДЯЩИЕ СООБЩЕНИЯ (Диспетчер)
   if (type === 'process-inbox') {
     console.log(`[Dispatcher] Анализирую входящие для ${userId}...`);
-    
+
     const decision = await evaluateInbox(userBigInt);
     console.log(`[Dispatcher] Решение: ${decision.action}. Причина: ${decision.reason}`);
 
     if (decision.action === 'reply_now') {
       await bot.telegram.sendChatAction(Number(userId), 'typing');
       const replyText = await generateReply(userBigInt);
-      
+
       await prisma.message.create({ data: { userId: userBigInt, sender: 'BOT', content: replyText } });
       await bot.telegram.sendMessage(Number(userId), replyText);
 
     } else if (decision.action === 'delay') {
       await messageQueue.add('delayed-reply', { type: 'process-inbox', userId: userId }, {
         delay: decision.delayMinutes * 60000,
-        jobId: `reply-${userId}` 
+        jobId: `reply-${userId}`
       });
       console.log(`[Dispatcher] Ответ отложен на ${decision.delayMinutes} мин.`);
 
-} else if (decision.action === 'enforce_german') {
+    } else if (decision.action === 'enforce_german') {
       await bot.telegram.sendChatAction(Number(userId), 'typing');
-      
+
       const user = await prisma.user.findUnique({ where: { id: userBigInt }, include: { persona: true } });
       const personaName = user?.persona?.name || "Бот";
 
@@ -199,16 +199,16 @@ ${chatHistory}`;
       });
 
       const replyText = completion.choices[0]?.message?.content || "Эй, мы же договаривались общаться на немецком! А ну-ка переведи то, что сейчас сказал 😉";
-      
+
       await prisma.message.create({ data: { userId: userBigInt, sender: 'BOT', content: replyText } });
       await bot.telegram.sendMessage(Number(userId), replyText);
       console.log(`[Dispatcher] Пользователь пишет на русском. Отправлен шуточный выговор.`);
-    
+
 
 
 
     } else if (decision.action === 'user_busy') {
-      const replyText = "Alles klar, sag Bescheid wenn du Zeit hast! 👍"; 
+      const replyText = "Alles klar, sag Bescheid wenn du Zeit hast! 👍";
       await prisma.message.create({ data: { userId: userBigInt, sender: 'BOT', content: replyText } });
       await bot.telegram.sendMessage(Number(userId), replyText);
 
@@ -216,7 +216,7 @@ ${chatHistory}`;
         type: 'proactive-message', userId: userId,
         context: "Пользователь просил подождать 10 минут назад. Узнай, освободился ли он."
       }, {
-        delay: 10 * 60000, jobId: `ping-${userId}` 
+        delay: 10 * 60000, jobId: `ping-${userId}`
       });
     }
   }
@@ -226,20 +226,24 @@ ${chatHistory}`;
     console.log(`[Worker] Инициатива для ${userId}. Событие: ${context}`);
     const user = await prisma.user.findUnique({ where: { id: userBigInt }, include: { persona: true } });
     if (!user || !user.persona) return;
-    
+
     const recentMessages = await prisma.message.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 2 });
     let timeInstruction = "Вы еще не общались сегодня. Начни с приветствия.";
-    
+
     if (recentMessages.length > 0) {
       const diffMinutes = Math.floor((Date.now() - recentMessages[0].createdAt.getTime()) / 60000);
       if (diffMinutes < 30) timeInstruction = "Вы общались только что! ЗАПРЕЩЕНО здороваться заново. Сделай плавный переход от прошлой темы.";
       else if (diffMinutes < 180) timeInstruction = "Вы общались пару часов назад. Можно перейти сразу к событию без долгих приветствий.";
     }
 
-    const systemPrompt = `Ты человек из Германии. Имя: ${user.persona.name}.
+    const systemPrompt = `Ты реальный человек из Германии. Имя: ${user.persona.name}.
 СЕЙЧАС ТЫ ПИШЕШЬ ПЕРВЫМ. Событие: "${context}"
 ${timeInstruction}
-Напиши коротко (1-3 предложения). Выдай только текст.`;
+
+ЖЕСТКИЕ ПРАВИЛА:
+1. ОБЯЗАТЕЛЬНО пиши ТОЛЬКО на немецком языке. Никакого русского.
+2. Не звучи как бот-помощник. Напиши это как сообщение в мессенджере другу (1-2 предложения, разговорный стиль).
+3. НЕ задавай вопрос в конце, если этого не требует контекст. Просто поделись мыслью.`;
 
     const completion = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: [{ role: "system", content: systemPrompt }] });
     const replyText = completion.choices[0]?.message?.content;

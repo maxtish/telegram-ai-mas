@@ -1,86 +1,102 @@
 import OpenAI from 'openai';
 import prisma from '../database';
 
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
-});
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function generateReply(userId: bigint) {
-  // 1. Достаем пользователя и его Персону из БД
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    include: { persona: true }
-  });
+// Настроения для живости бота
+const moods = [
+  "бодрое и энергичное",
+  "слегка уставшее, хочется кофе",
+  "задумчивое и философское",
+  "игривое, хочется шутить",
+  "спокойное и расслабленное"
+];
 
-  if (!user || !user.persona) {
-    throw new Error("Персона не найдена");
-  }
-  const persona = user.persona;
+export async function generateReply(userId: bigint): Promise<string> {
+  const user = await prisma.user.findUnique({ where: { id: userId }, include: { persona: true } });
+  if (!user || !user.persona) return "Entschuldigung, ich bin gerade beschäftigt.";
 
-  // 2. Получаем последние 15 сообщений для контекста диалога
+  // 1. Достаем историю
   const recentMessages = await prisma.message.findMany({
-    where: { userId: userId },
+    where: { userId },
     orderBy: { createdAt: 'desc' },
-    take: 15
+    take: 12
   });
+  recentMessages.reverse();
 
-  // Получаем до 3-х актуальных задач от Учителя
-  const teacherTasks = await prisma.vocabulary.findMany({
-    where: { userId: userId, status: 'needs_practice' },
+  // 2. СЛОВА ИЗ СЛОВАРЯ (Для пассивного закрепления)
+  const wordsToPractice = await prisma.vocabulary.findMany({
+    where: { userId, translation: { not: null }, status: 'learning' },
+    orderBy: { nextReview: 'asc' },
     take: 3
   });
 
-  let pedagogicalInstructions = "";
-  if (teacherTasks.length > 0) {
-    pedagogicalInstructions = "\n\nСЕКРЕТНАЯ ЗАДАЧА (как учителя):\nСтудент допускает ошибки в следующих темах:\n";
-    pedagogicalInstructions += teacherTasks.map(t => `- ${t.wordOrRule}: ${t.notes}`).join('\n');
-    pedagogicalInstructions += "\nТвоя задача — в рамках обычного диалога (оставаясь в своей роли!) невзначай использовать эти конструкции или задать встречный вопрос так, чтобы студент был вынужден попрактиковать эти правила.";
-  }
+  const wordsList = wordsToPractice.map(w => w.wordOrRule).join(', ');
+  const wordsPrompt = wordsList.length > 0
+    ? `\nПОЛЕЗНАЯ ЗАДАЧА: Постарайся органично вплести в свой ответ хотя бы одно из этих слов: [ ${wordsList} ].`
+    : "";
 
+  // 3. ЗАДАЧИ ОТ УЧИТЕЛЯ (Грамматика)
+  const teacherTasks = await prisma.vocabulary.findMany({
+    where: { userId: userId, status: 'needs_practice' },
+    take: 2 // Берем не больше двух ошибок за раз, чтобы не перегружать сообщение
+  });
 
-  // Переворачиваем массив, чтобы старые сообщения были первыми (хронологический порядок для OpenAI)
-  recentMessages.reverse();
+  const grammarPrompt = teacherTasks.length > 0
+    ? `\nОТРАБОТКА ГРАММАТИКИ: Пользователь допустил ошибки. Правила, которые выявил скрытый агент-учитель: [ ${teacherTasks.map(t => t.wordOrRule).join(' | ')} ].
+Твоя задача: Исправь ошибку максимально элегантно прямо внутри текущего диалога.
+- Обязательно покажи правильное использование на своем личном примере в ответе на немецком.
+- Сделай ТОЛЬКО ОДНУ короткую ремарку на РУССКОМ языке (в скобках или отдельным предложением), чтобы объяснить саму суть ошибки.
+- Не задавай проверочных вопросов! Просто покажи правильный вариант и продолжай беседу.`
+    : "";
 
-  // 3. Формируем системный промпт с личностью
-  const systemPrompt = `Ты живой человек из Германии. Общаешься в Telegram с пользователем, который учит немецкий язык.
-Твоя задача — вести естественный, живой диалог. 
+  // 4. Выбираем случайное настроение
+  const currentMood = moods[Math.floor(Math.random() * moods.length)];
 
-Твоя личность:
-- Имя: ${persona.name}
-- Возраст: ${persona.age}
-- Город: ${persona.city}
-- Профессия: ${persona.profession}
-- Хобби: ${persona.hobbies.join(', ')}
+  // 5. Жесткий промпт для старшей модели
+  const systemPrompt = `Ты реальный человек из Германии. 
+Твое имя: ${user.persona.name}, профессия: ${user.persona.profession}, живешь в: ${user.persona.city}.
+Твое текущее настроение: ${currentMood}. Отрази это в стиле ответа (без излишней театральности).
 
-Стиль общения: ${persona.communicationStyle}
+ЖЕСТКИЕ ПРАВИЛА ПОВЕДЕНИЯ (Anti-Bot):
+1. ЗАПРЕЩЕНО заканчивать каждое сообщение вопросом. Ты должен задавать вопрос не чаще, чем в 1 из 4 сообщений.
+2. Просто отреагируй, согласись, поделись мнением и поставь точку. Пусть повиснет пауза.
+3. Общайся на равных, как приятель.
+4. Пиши ТОЛЬКО на немецком языке. ЕДИНСТВЕННОЕ исключение — если нужно перевести слово по просьбе пользователя или если срабатывает блок ОТРАБОТКА ГРАММАТИКИ. В остальном — строгий немецкий.${wordsPrompt}${grammarPrompt}`;
 
-ПРАВИЛА:
-1. Пиши ТОЛЬКО от лица этого персонажа. 
-2. Не будь типичным ИИ-ассистентом. Ты обычный человек: можешь шутить, рассказывать о своем дне, задавать встречные вопросы.
-3. Отвечай на немецком языке. Если пользователь совсем не понимает, можешь перевести пару слов на русский, но держи фокус на немецком.
-4. Пиши коротко, как люди пишут в мессенджерах (1-3 предложения), не пиши огромные эссе.${pedagogicalInstructions}
-5. СУПЕР ВАЖНО: НЕ заканчивай каждое сообщение вопросом! Это неестественно и раздражает. Живые люди часто просто соглашаются, констатируют факт или делятся мнением без вопросов в конце. Задавай встречные вопросы, ТОЛЬКО если тебе реально интересно или это строго необходимо. Не будь навязчивым!
-`;
-
-  // 4. Собираем массив сообщений для OpenAI
-  const messagesForOpenAI: any[] = [
+  const messages: any[] = [
     { role: "system", content: systemPrompt }
   ];
 
-  // Добавляем историю переписки
-  for (const msg of recentMessages) {
-    messagesForOpenAI.push({
-      role: msg.sender === 'USER' ? 'user' : 'assistant',
+  recentMessages.forEach(msg => {
+    messages.push({
+      role: msg.sender === 'BOT' ? 'assistant' : 'user',
       content: msg.content
     });
-  }
-
-  // 5. Отправляем запрос к LLM
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini", // Работает быстро и недорого для чатов
-    messages: messagesForOpenAI,
-    temperature: 0.8, // Делает ответы более креативными и "человечными"
   });
 
-  return completion.choices[0]?.message?.content || "Entschuldigung, ich bin gerade beschäftigt. (Извини, я сейчас занят)";
+  try {
+    // Используем старшую модель для эмоционального и сложного диалога
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o",
+      messages: messages,
+      temperature: 0.7
+    });
+
+    const replyText = completion.choices[0]?.message?.content || "Alles klar!";
+
+    // 6. ОЧИСТКА БАЗЫ (Удаляем отработанные правила)
+    if (teacherTasks.length > 0) {
+      await prisma.vocabulary.deleteMany({
+        where: { id: { in: teacherTasks.map(t => t.id) } }
+      });
+      console.log(`[Communicator] Отработано и удалено ${teacherTasks.length} грамматических правил.`);
+    }
+
+    return replyText;
+
+  } catch (error) {
+    console.error("[Communicator] Ошибка генерации ответа:", error);
+    return "Ich habe gerade ein kleines Netzwerkproblem, Moment mal...";
+  }
 }
