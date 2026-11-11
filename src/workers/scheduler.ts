@@ -6,6 +6,8 @@ import prisma from '../database';
 import { evaluateInbox } from '../agents/dispatcher';
 import { generateReply } from '../agents/communicator';
 import { planDay } from '../agents/planner';
+import { generateVoice } from '../agents/voice';
+
 
 const connection = new IORedis({ maxRetriesPerRequest: null });
 export const messageQueue = new Queue('message-queue', { connection });
@@ -170,11 +172,29 @@ ${chatHistory}`;
     console.log(`[Dispatcher] Решение: ${decision.action}. Причина: ${decision.reason}`);
 
     if (decision.action === 'reply_now') {
-      await bot.telegram.sendChatAction(Number(userId), 'typing');
-      const replyText = await generateReply(userBigInt);
+      const replyText = await generateReply(userId, decision.useVoice);
 
-      await prisma.message.create({ data: { userId: userBigInt, sender: 'BOT', content: replyText } });
-      await bot.telegram.sendMessage(Number(userId), replyText);
+      // 1. Сохраняем в БД как обычный текст (история и контекст не ломаются)
+      await prisma.message.create({ data: { userId, sender: 'BOT', content: replyText } });
+
+      const user = await prisma.user.findUnique({ where: { id: userId }, include: { persona: true } });
+
+      // 2. ПЕРЕХВАТЧИК: Диспетчер сказал использовать голос?
+      if (decision.useVoice && user?.persona) {
+        try {
+          console.log(`[Voice] Генерирую аудио для пользователя ${userId}...`);
+          const audioBuffer = await generateVoice(replyText, user.persona.id);
+
+          // Отправляем как настоящее голосовое сообщение Telegram
+          await bot.telegram.sendVoice(Number(userId), { source: audioBuffer });
+        } catch (error) {
+          console.error(`[Voice] Ошибка генерации голоса, падаем на текст:`, error);
+          await bot.telegram.sendMessage(Number(userId), replyText);
+        }
+      } else {
+        // Обычная текстовая отправка
+        await bot.telegram.sendMessage(Number(userId), replyText);
+      }
 
     } else if (decision.action === 'delay') {
       await messageQueue.add('delayed-reply', { type: 'process-inbox', userId: userId }, {

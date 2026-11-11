@@ -18,7 +18,8 @@ const moods = [
   "милое, заботливое, использует ласковые словечки" // милая и добрая
 ];
 
-export async function generateReply(userId: bigint): Promise<string> {
+
+export async function generateReply(userId: bigint, useVoice: boolean = false): Promise<string> {
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { persona: true } });
   if (!user || !user.persona) return "Entschuldigung, ich bin gerade beschäftigt.";
 
@@ -40,6 +41,15 @@ export async function generateReply(userId: bigint): Promise<string> {
   const wordsList = wordsToPractice.map(w => w.wordOrRule).join(', ');
   const wordsPrompt = wordsList.length > 0
     ? `\nПОЛЕЗНАЯ ЗАДАЧА: Постарайся органично вплести в свой ответ хотя бы одно из этих слов: [ ${wordsList} ].`
+    : "";
+
+
+
+  // ДОБАВЛЯЕМ ПРАВИЛО ДЛЯ ГОЛОСОВОГО СООБЩЕНИЯ
+  const voicePrompt = useVoice
+    ? `\nВНИМАНИЕ! Пользователь попросил голосовое сообщение, и твой текст БУДЕТ озвучен нейросетью. 
+- НИ В КОЕМ СЛУЧАЕ не говори, что ты не можешь отправить аудио.
+- Пиши текст так, будто ты РЕАЛЬНО надиктовываешь аудиосообщение на ходу (используй междометия типа "Ähm", "Also, разговорные паузы, дыши").`
     : "";
 
   // 3. ЗАДАЧИ ОТ УЧИТЕЛЯ (Грамматика)
@@ -69,7 +79,7 @@ export async function generateReply(userId: bigint): Promise<string> {
 2. ЗАПРЕЩЕНО заканчивать каждое сообщение вопросом. Спрашивай что-то не чаще, чем в 1 из 4 сообщений.
 3. Просто реагируй (согласись, удивись, поделись мнением) и ставь точку.
 4. Общайся на равных, не будь слишком услужливым.
-5. Пиши ТОЛЬКО на немецком языке (исключение: ремарка из ОТРАБОТКИ ГРАММАТИКИ).${wordsPrompt}${grammarPrompt}`;
+5. Пиши ТОЛЬКО на немецком языке (исключение: ремарка из ОТРАБОТКИ ГРАММАТИКИ).${wordsPrompt}${grammarPrompt}${voicePrompt}`;
   const messages: any[] = [
     { role: "system", content: systemPrompt }
   ];
