@@ -100,7 +100,8 @@ ${userAboutInfo}
   recentMessages.forEach(msg => {
     messages.push({
       role: msg.sender === 'BOT' ? 'assistant' : 'user',
-      content: msg.content
+      // Очищаем текст от технической метки перед отправкой в LLM
+      content: msg.content.replace(/\[VOICE\] /g, '')
     });
   });
 

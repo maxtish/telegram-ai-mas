@@ -9,6 +9,7 @@ import { checkWordQuiz } from '../agents/examiner';
 import { analyzeMistakes } from '../agents/teacher';
 import OpenAI from 'openai';
 import { analyzeUserProfile } from '../agents/profiler';
+import { transcribeAudio } from '../agents/voice';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export function setupMessageHandlers(bot: Telegraf) {
@@ -309,4 +310,68 @@ export function setupMessageHandlers(bot: Telegraf) {
         }
 
     });
+
+
+    // ============================================================================
+    // ОБРАБОТКА ГОЛОСОВЫХ СООБЩЕНИЙ
+    // ============================================================================
+    bot.on('voice', async (ctx) => {
+        const telegramId = BigInt(ctx.from.id);
+        const user = await prisma.user.findUnique({ where: { id: telegramId } });
+        if (!user) return;
+
+        // Игнорируем голосовые, если юзер в режиме словаря или квиза
+        if (user.botState !== 'IDLE') {
+            return ctx.reply("Сначала заверши текущее действие текстом 👆");
+        }
+
+        try {
+            // Скачиваем голосовое сообщение
+            const fileLink = await ctx.telegram.getFileLink(ctx.message.voice.file_id);
+
+            // Показываем пользователю статус "печатает...", пока аудио распознается
+            await ctx.sendChatAction('typing');
+
+            // Переводим голос в текст
+            const text = await transcribeAudio(fileLink.href);
+            if (!text) return;
+
+            // МАРКЕР ГОЛОСОВОГО СООБЩЕНИЯ
+            const finalContent = `[VOICE] ${text}`;
+
+            // 1. Сохраняем в базу (с маркером!)
+            await prisma.message.create({ data: { userId: telegramId, sender: 'USER', content: finalContent } });
+
+            // 2. Фоновый профайлер (узнает факты из голосового)
+            analyzeUserProfile(telegramId, text).catch(console.error);
+
+            // 3. Отменяем старые таймеры и ставим новый на 10 секунд (Debounce)
+            const pingJobId = `ping-${telegramId}`;
+            const pingJob = await messageQueue.getJob(pingJobId);
+            if (pingJob) await pingJob.remove();
+
+            const jobId = `reply-${telegramId}`;
+            const oldJob = await messageQueue.getJob(jobId);
+            if (oldJob) await oldJob.remove();
+
+            await messageQueue.add('process-inbox', {
+                type: 'process-inbox',
+                userId: telegramId.toString()
+            }, {
+                delay: 10000,
+                jobId: jobId
+            });
+
+            // 4. Триггер Учителя
+            const userMsgCount = await prisma.message.count({ where: { userId: telegramId, sender: 'USER' } });
+            if (userMsgCount % 5 === 0) {
+                analyzeMistakes(telegramId).catch(console.error);
+            }
+
+        } catch (error) {
+            console.error("Ошибка при обработке голосового:", error);
+            ctx.reply("Прости, не смог разобрать твое голосовое сообщение.");
+        }
+    });
+
 }

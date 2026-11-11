@@ -107,18 +107,37 @@ export async function evaluateInbox(userId: bigint) {
   // ИСПОЛЬЗУЕМ НЕЙТРАЛЬНОЕ "User:", чтобы не триггерить детектор языков!
   const inboxText = unreadMessages.map(m => `User: ${m.content}`).join('\n');
 
-  // ПРОГРАММНЫЙ ФИЛЬТР: Проверяем кириллицу ТОЛЬКО в самом тексте сообщений
+  // ПРОГРАММНЫЙ ФИЛЬТР
   const pureUserText = unreadMessages.map(m => m.content).join(' ');
   const hasCyrillic = /[А-Яа-яЁё]/.test(pureUserText);
+
+  // Проверяем, присылал ли пользователь голосовое сообщение в этой серии
+  const userSentVoice = pureUserText.includes('[VOICE]');
 
   const now = new Date();
   const timeString = now.toLocaleTimeString('de-DE', { timeZone: 'Europe/Berlin', hour: '2-digit', minute: '2-digit' });
   const dayOfWeek = now.toLocaleDateString('de-DE', { timeZone: 'Europe/Berlin', weekday: 'long' });
 
-  // Распределяем задачи
+  let decision;
+
+  // Распределяем задачи между диспетчерами
   if (hasCyrillic) {
-    return await evaluateRussianInbox(inboxText, user.persona);
+    decision = await evaluateRussianInbox(inboxText, user.persona);
   } else {
-    return await evaluateGermanInbox(inboxText, user.persona, timeString, dayOfWeek);
+    decision = await evaluateGermanInbox(inboxText, user.persona, timeString, dayOfWeek);
   }
+
+  // --- ЖЕСТКОЕ ПРАВИЛО 90% ---
+  // Если юзер прислал голосовое, мы математически с вероятностью 90% заставляем бота ответить голосом.
+  // При этом мы не ломаем логику (если бот решил delay/ignore, мы его не будим).
+  if (userSentVoice && decision.action === 'reply_now') {
+    if (Math.random() < 0.90) {
+      decision.useVoice = true;
+      console.log(`[Dispatcher] Пользователь прислал аудио. Активирован голосовой ответ (90% шанс).`);
+    } else {
+      console.log(`[Dispatcher] Пользователь прислал аудио, но сработали 10% шанса на текстовый ответ.`);
+    }
+  }
+
+  return decision;
 }
