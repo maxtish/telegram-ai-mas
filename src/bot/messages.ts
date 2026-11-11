@@ -1,3 +1,4 @@
+require('dotenv').config();
 import { Markup, Telegraf } from 'telegraf';
 import prisma from '../database';
 import { mainMenu, cancelKeyboard, quizKeyboard } from './keyboards';
@@ -6,7 +7,8 @@ import { messageQueue } from '../workers/scheduler';
 import { processNewWords } from '../agents/dictionary';
 import { checkWordQuiz } from '../agents/examiner';
 import { analyzeMistakes } from '../agents/teacher';
-
+import OpenAI from 'openai';
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export function setupMessageHandlers(bot: Telegraf) {
 
@@ -104,6 +106,75 @@ export function setupMessageHandlers(bot: Telegraf) {
 
             return ctx.reply(responseText, { parse_mode: 'HTML', ...mainMenu });
         }
+
+        // --- КНОПКА: СМЕНИТЬ СОБЕСЕДНИКА ---
+        if (text === '🔄 Сменить собеседника') {
+            await ctx.reply("🔄 Собираю вещи... Ищу тебе нового собеседника в Германии 🚄");
+
+            // 1. Полностью чистим историю переписки
+            await prisma.message.deleteMany({ where: { userId: telegramId } });
+
+            // 2. Чистим отловленные ошибки грамматики. 
+            // Словарь остается, так как у обычных слов есть поле translation.
+            await prisma.vocabulary.deleteMany({
+                where: {
+                    userId: telegramId,
+                    translation: null
+                }
+            });
+
+            // 3. Удаляем старую анкету (Persona)
+            await prisma.persona.deleteMany({ where: { userId: telegramId } });
+
+            // 4. Генерируем нового персонажа через LLM
+            try {
+                const completion = await openai.chat.completions.create({
+                    model: "gpt-4o-mini",
+                    response_format: { type: "json_object" }, // <-- ЗАСТАВЛЯЕМ ВЕРНУТЬ ЧИСТЫЙ JSON
+                    messages: [{
+                        role: "system",
+                        content: 'Сгенерируй случайного жителя Германии (желательно из Баварии и девушку). Верни СТРОГО валидный JSON: {"name": "Имя", "age": 30, "city": "Город", "profession": "Профессия", "hobbies": ["Хобби 1", "Хобби 2"], "communicationStyle": "Стиль общения (например: веселый, строгий, саркастичный)"}'
+                    }]
+                });
+
+                // Получаем текст ответа
+                let rawContent = completion.choices[0]?.message?.content || '{}';
+
+                // Срезаем Markdown-оформление (```json и ```), если модель вдруг его добавила
+                rawContent = rawContent.replace(/```json/gi, '').replace(/```/gi, '').trim();
+
+                const personaData = JSON.parse(rawContent);
+
+                // 5. Сохраняем новую персону в базу, используя правильные поля
+                const newPersona = await prisma.persona.create({
+                    data: {
+                        userId: telegramId,
+                        name: personaData.name || 'Hans',
+                        age: personaData.age || 35,
+                        city: personaData.city || 'München',
+                        profession: personaData.profession || 'Ingenieur',
+                        hobbies: Array.isArray(personaData.hobbies) ? personaData.hobbies : ['Bier', 'Fußball'],
+                        communicationStyle: personaData.communicationStyle || 'freundlich'
+                    }
+                });
+
+                return ctx.reply(
+                    `🎉 Твой новый собеседник на связи!\n\n` +
+                    `🗣 <b>Имя:</b> ${newPersona.name} (${newPersona.age} лет)\n` +
+                    `💼 <b>Профессия:</b> ${newPersona.profession}\n` +
+                    `🏙 <b>Город:</b> ${newPersona.city}\n` +
+                    `🎯 <b>Хобби:</b> ${newPersona.hobbies.join(', ')}\n` +
+                    `🎭 <b>Характер:</b> ${newPersona.communicationStyle}\n\n` +
+                    `Напиши <i>"Hallo"</i>, чтобы познакомиться! История переписки очищена.`,
+                    { parse_mode: 'HTML', reply_markup: mainMenu.reply_markup }
+                );
+
+            } catch (error) {
+                console.error("Ошибка при смене собеседника:", error);
+                return ctx.reply("Произошла ошибка при поиске нового собеседника. Попробуй еще раз.");
+            }
+        }
+
 
         // 5. РЕЖИМ ОЖИДАНИЯ СЛОВ
         if (user.botState === 'WAITING_WORDS') {
