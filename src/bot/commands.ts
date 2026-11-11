@@ -166,6 +166,55 @@ export function setupCommands(bot: Telegraf) {
         ctx.reply("Расписание создано! Жди сообщений от бота в ближайшие пару минут. 😉");
     });
 
+    // ПРОСМОТР ДОСЬЕ
+    bot.command('profile', async (ctx) => {
+        const user = await prisma.user.findUnique({ where: { id: BigInt(ctx.from.id) } });
+        if (!user) return;
+
+        const name = user.realName || 'Не задано';
+        const interests = user.interests.length > 0 ? user.interests.join(', ') : 'Пусто';
+        const about = user.about || 'Пусто';
+
+        return ctx.reply(
+            `🗂 <b>Досье, которое собрал бот:</b>\n\n` +
+            `🗣 Имя: ${name}\n` +
+            `🎯 Интересы: ${interests}\n` +
+            `📝 О себе: ${about}\n\n` +
+            `<i>Чтобы очистить память, напиши /clear_profile</i>`,
+            { parse_mode: 'HTML' }
+        );
+    });
+
+    // ОЧИСТКА ДОСЬЕ
+    bot.command('clear_profile', async (ctx) => {
+        await prisma.user.update({
+            where: { id: BigInt(ctx.from.id) },
+            data: { realName: null, interests: [], about: null }
+        });
+        return ctx.reply("🌪 Память очищена! Бот забыл всё о тебе.");
+    });
+
+    // --- КОМАНДА: ПОМОЩЬ ---
+    bot.command('help', async (ctx) => {
+        const helpText = `
+🛠 <b>Доступные команды:</b>
+
+📚 <b>Словарь и Грамматика</b>
+/del [номер] — Удалить слово из словаря по его номеру (например: <i>/del 5</i>)
+/clear_dict — Полностью очистить словарь
+/fixdb — Починить сломанные или зависшие слова в словаре
+
+🧠 <b>Память и Настройки</b>
+/profile — Посмотреть, что бот запомнил о тебе (имя, хобби, факты)
+/clear_profile — Стереть всю информацию о себе из памяти бота
+
+<i>Также ты можешь воспользоваться кнопками в меню ниже!</i>
+    `;
+
+        return ctx.reply(helpText, { parse_mode: 'HTML', reply_markup: mainMenu.reply_markup });
+    });
+
+
 
 
 }

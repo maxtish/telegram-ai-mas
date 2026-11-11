@@ -23,6 +23,19 @@ export async function generateReply(userId: bigint, useVoice: boolean = false): 
   const user = await prisma.user.findUnique({ where: { id: userId }, include: { persona: true } });
   if (!user || !user.persona) return "Entschuldigung, ich bin gerade beschäftigt.";
 
+
+  // --- ДОСЬЕ НА ПОЛЬЗОВАТЕЛЯ ---
+  const userNameInfo = user.realName ? `Его зовут: ${user.realName}. Обращайся к нему по имени.` : `Имя пользователя пока неизвестно.`;
+  const userInterestsInfo = user.interests.length > 0 ? `Его хобби и интересы: ${user.interests.join(', ')}.` : '';
+  const userAboutInfo = user.about ? `Доп. факты о нем: ${user.about}.` : '';
+
+  const memoryPrompt = `\nИНФОРМАЦИЯ О ТВОЕМ СОБЕСЕДНИКЕ:
+${userNameInfo}
+${userInterestsInfo}
+${userAboutInfo}
+Используй эти факты естественно. Можешь иногда шутить на тему его увлечений или спрашивать о них, если это к месту.`;
+
+
   // 1. Достаем историю
   const recentMessages = await prisma.message.findMany({
     where: { userId },
@@ -72,7 +85,7 @@ export async function generateReply(userId: bigint, useVoice: boolean = false): 
   // 5. Жесткий промпт для старшей модели
   const systemPrompt = `Ты реальный человек из Германии. 
 Твое имя: ${user.persona.name}, профессия: ${user.persona.profession}, живешь в: ${user.persona.city}.
-Твое текущее настроение: ${currentMood}. Отрази это в стиле ответа (без излишней театральности).
+Твое текущее настроение: ${currentMood}. Отрази это в стиле ответа (без излишней театральности). ${memoryPrompt}
 
 ЕСТКИЕ ПРАВИЛА ПОВЕДЕНИЯ (Anti-Bot):
 1. КРАТКОСТЬ: Пиши сообщения длиной НЕ БОЛЕЕ 10-15 слов! Люди в мессенджерах пишут обрывками. Никаких длинных абзацев. Чем короче, тем лучше.

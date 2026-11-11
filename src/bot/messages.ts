@@ -8,6 +8,7 @@ import { processNewWords } from '../agents/dictionary';
 import { checkWordQuiz } from '../agents/examiner';
 import { analyzeMistakes } from '../agents/teacher';
 import OpenAI from 'openai';
+import { analyzeUserProfile } from '../agents/profiler';
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 export function setupMessageHandlers(bot: Telegraf) {
@@ -175,6 +176,26 @@ export function setupMessageHandlers(bot: Telegraf) {
             }
         }
 
+        // --- КНОПКА: ПОМОЩЬ ---
+        if (text === '🆘 Помощь') {
+            const helpText = `
+🛠 <b>Доступные команды:</b>
+
+📚 <b>Словарь и Грамматика</b>
+/del [номер] — Удалить слово из словаря по его номеру (например: <i>/del 5</i>)
+/clear_dict — Полностью очистить словарь
+/fixdb — Починить сломанные или зависшие слова в словаре
+
+🧠 <b>Память и Настройки</b>
+/profile — Посмотреть, что бот запомнил о тебе (имя, хобби, факты)
+/clear_profile — Стереть всю информацию о себе из памяти бота
+
+<i>Ты всегда можешь вызвать это меню командой /help</i>
+      `;
+            return ctx.reply(helpText, { parse_mode: 'HTML' });
+        }
+
+
 
         // 5. РЕЖИМ ОЖИДАНИЯ СЛОВ
         if (user.botState === 'WAITING_WORDS') {
@@ -254,12 +275,11 @@ export function setupMessageHandlers(bot: Telegraf) {
             }
         }
 
-        // 7. ОБЫЧНЫЙ ДИАЛОГ -> ОТПРАВЛЯЕМ ДИСПЕТЧЕРУ (Оставляем как было)
-
         // 7. ОБЫЧНЫЙ ДИАЛОГ -> ОТПРАВЛЯЕМ ДИСПЕТЧЕРУ
         await prisma.message.create({ data: { userId: telegramId, sender: 'USER', content: text } });
 
-        // --- ОТМЕНЯЕМ ПИНГ ---
+        // Запускаем Профайлер в фоне (без await, чтобы не тормозить бота!)
+        analyzeUserProfile(telegramId, text).catch(console.error);        // --- ОТМЕНЯЕМ ПИНГ ---
         // Если мы ждали пользователя 10 минут, а он пришел сам на 5-й минуте,
         // мы должны отменить напоминание, чтобы не выглядеть глупо.
         const pingJobId = `ping-${telegramId}`;

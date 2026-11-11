@@ -14,6 +14,12 @@ model User {
   firstName    String?
   languageCode String?   @default("ru")
   botState     String    @default("IDLE")
+  
+  // --- НОВЫЕ ПОЛЯ ДЛЯ ПАМЯТИ ---
+  realName     String?   // Как пользователь просил его называть
+  interests    String[]  // Массив интересов (например: ["мотоциклы", "3D печать", "астрономия"])
+  about        String?   // Любые другие факты (работа, семья, привычки)
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
