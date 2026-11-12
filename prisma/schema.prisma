@@ -9,24 +9,32 @@ datasource db {
 
 // Пользователь Telegram
 model User {
-  id           BigInt    @id
-  username     String?
-  firstName    String?
-  languageCode String?   @default("ru")
-  botState     String    @default("IDLE")
+  id            BigInt    @id
+  username      String?
+  firstName     String?
+  languageCode  String?   @default("ru")
   
-  // --- НОВЫЕ ПОЛЯ ДЛЯ ПАМЯТИ ---
-  realName     String?   // Как пользователь просил его называть
-  interests    String[]  // Массив интересов (например: ["мотоциклы", "3D печать", "астрономия"])
-  about        String?   // Любые другие факты (работа, семья, привычки)
+  botState      String    @default("IDLE") 
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  // --- НОВЫЕ ПОЛЯ ДЛЯ УЧИТЕЛЯ ---
+  learningLevel String?   // Например: "A2", "B1"
+  learningTopic String?   // Например: "Общение в автомастерской"
+  lessonSummary String?
+  
+  // Долговременная память
+  realName      String?
+  interests     String[]
+  about         String?
 
-  persona      Persona?
-  messages     Message[]
-  vocabulary   Vocabulary[]
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  persona       Persona?
+  messages      Message[]
+  vocabulary    Vocabulary[]
+  mistakes      GrammarMistake[] // Связь с новой таблицей
 }
+
 
 // Уникальная личность бота, сгенерированная для конкретного пользователя
 model Persona {
@@ -42,6 +50,24 @@ model Persona {
 
   user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 }
+
+
+// --- ОШИБКИ И ИНТЕРВАЛЬНОЕ ПОВТОРЕНИЕ ---
+model GrammarMistake {
+  id                Int      @id @default(autoincrement())
+  userId            BigInt
+  
+  russianSentence   String   // То предложение, которое бот дал на перевод
+  correctGerman     String   // Идеальный перевод для проверки нейросетью
+  mistakeCategory   String?  // Категория (например: "Падежи", "Порядок слов")
+  
+  streak            Int      @default(0) // Сколько раз подряд перевел без ошибок
+  nextReview        DateTime @default(now()) // Дата следующего появления
+  createdAt         DateTime @default(now())
+  
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
 
 // История переписки
 model Message {

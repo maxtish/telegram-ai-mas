@@ -1,12 +1,12 @@
 require('dotenv').config();
 import { Markup, Telegraf } from 'telegraf';
 import prisma from '../database';
-import { mainMenu, cancelKeyboard, quizKeyboard } from './keyboards';
+import { mainMenu, levelMenu, teacherMenu, cancelKeyboard } from './keyboards';
 import { messageQueue } from '../workers/scheduler';
 
 import { processNewWords } from '../agents/dictionary';
 import { checkWordQuiz } from '../agents/examiner';
-import { analyzeMistakes } from '../agents/teacher';
+import { analyzeMistakes, processTeacherTask, startTeacherSession } from '../agents/teacher';
 import OpenAI from 'openai';
 import { analyzeUserProfile } from '../agents/profiler';
 import { transcribeAudio } from '../agents/voice';
@@ -195,6 +195,113 @@ export function setupMessageHandlers(bot: Telegraf) {
       `;
             return ctx.reply(helpText, { parse_mode: 'HTML' });
         }
+
+
+        // ==========================================================
+        // КНОПКА: ВХОД В РЕЖИМ УЧИТЕЛЯ
+        // ==========================================================
+        if (text === '🎓 Режим Учителя') {
+            if (user.learningLevel && user.learningTopic) {
+                // У пользователя уже есть начатая тема
+                await prisma.user.update({ where: { id: telegramId }, data: { botState: 'TEACHER_RESUME' } });
+
+                return ctx.reply(
+                    `У тебя есть сохраненный урок! 📚\n\n` +
+                    `Уровень: <b>${user.learningLevel}</b>\n` +
+                    `Тема: <b>"${user.learningTopic}"</b>\n\n` +
+                    `Продолжим или начнем новую тему?`,
+                    {
+                        parse_mode: 'HTML',
+                        reply_markup: Markup.keyboard([
+                            ['▶️ Продолжить', '🆕 Начать новую'],
+                            ['❌ Отмена']
+                        ]).resize().reply_markup
+                    }
+                );
+            } else {
+                // Первый запуск
+                await prisma.user.update({ where: { id: telegramId }, data: { botState: 'TEACHER_SETUP_LEVEL' } });
+                return ctx.reply("Какой у тебя примерный уровень немецкого?", { reply_markup: levelMenu.reply_markup });
+            }
+        }
+
+        // ==========================================================
+        // ВЫБОР: ПРОДОЛЖИТЬ ИЛИ НАЧАТЬ ЗАНОВО
+        // ==========================================================
+        if (user.botState === 'TEACHER_RESUME') {
+            if (text === '▶️ Продолжить') {
+                await prisma.user.update({ where: { id: telegramId }, data: { botState: 'TEACHER_ACTIVE' } });
+                await ctx.reply(`Возвращаемся к теме <b>"${user.learningTopic}"</b>! 🚀\n<i>Генерирую задание...</i>`, { parse_mode: 'HTML', reply_markup: teacherMenu.reply_markup });
+
+                const nextTask = await startTeacherSession(telegramId);
+                return ctx.reply(nextTask, { parse_mode: 'HTML' });
+            }
+            else if (text === '🆕 Начать новую') {
+                // Сбрасываем старое резюме урока, чтобы темы не смешались
+                await prisma.user.update({
+                    where: { id: telegramId },
+                    data: { botState: 'TEACHER_SETUP_LEVEL', lessonSummary: null }
+                });
+                return ctx.reply("Какой у тебя примерный уровень немецкого?", { reply_markup: levelMenu.reply_markup });
+            }
+        }
+
+        // ==========================================================
+        // КНОПКА: ВЫХОД ИЗ УРОКА / ОТМЕНА
+        // ==========================================================
+        if (text === '🛑 Закончить урок' || text === '❌ Отмена') {
+            await prisma.user.update({ where: { id: telegramId }, data: { botState: 'IDLE' } });
+            return ctx.reply("Урок завершен! Твой обычный собеседник снова на связи 🇩🇪", { reply_markup: mainMenu.reply_markup });
+        }
+
+        // ==========================================================
+        // МАСТЕР НАСТРОЙКИ УЧИТЕЛЯ
+        // ==========================================================
+        if (user.botState === 'TEACHER_SETUP_LEVEL') {
+            // Сохраняем уровень и переходим к выбору темы
+            await prisma.user.update({
+                where: { id: telegramId },
+                data: { learningLevel: text, botState: 'TEACHER_SETUP_TOPIC' }
+            });
+            return ctx.reply(
+                `Уровень ${text} принят! 🎯\n\n` +
+                `Теперь напиши мне тему или ситуацию, которую хочешь потренировать.\n` +
+                `<i>Например: "Ремонт мотоцикла", "Собеседование на работу", "Покупка продуктов" или просто "Повседневная рутина".</i>`,
+                { parse_mode: 'HTML', reply_markup: cancelKeyboard.reply_markup }
+            );
+        }
+
+        if (user.botState === 'TEACHER_SETUP_TOPIC') {
+            // Сохраняем тему, активируем режим и запускаем первое задание!
+            await prisma.user.update({
+                where: { id: telegramId },
+                data: { learningTopic: text, botState: 'TEACHER_ACTIVE' }
+            });
+
+            await ctx.reply(
+                `🔥 Тема: <b>"${text}"</b>. Режим перевода активирован!\n\n` +
+                `Правила:\n1. Я даю короткое предложение на русском.\n2. Ты пишешь перевод на немецкий.\n3. Я проверяю и даю следующее.\n\n` +
+                `<i>Генерирую первое задание...</i>`,
+                { parse_mode: 'HTML', reply_markup: teacherMenu.reply_markup }
+            );
+
+            // ЗАПУСКАЕМ УРОК
+            const firstTask = await startTeacherSession(telegramId);
+            return ctx.reply(firstTask, { parse_mode: 'HTML' });
+        }
+
+        // ==========================================================
+        // АКТИВНЫЙ РЕЖИМ УЧИТЕЛЯ (Проверка перевода)
+        // ==========================================================
+        if (user.botState === 'TEACHER_ACTIVE') {
+            await ctx.sendChatAction('typing');
+
+            // Отдаем перевод на проверку Агенту-Учителю
+            const reply = await processTeacherTask(telegramId, text);
+            return ctx.reply(reply, { parse_mode: 'HTML' });
+        }
+
+
 
 
 
