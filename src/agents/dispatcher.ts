@@ -28,7 +28,7 @@ ${inboxText}
 }`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o", // Флагманская модель для точного понимания контекста
+    model: "gpt-6-luna", // Флагманская модель для точного понимания контекста
     messages: [{ role: "system", content: prompt }],
     response_format: { type: "json_object" }
   });
@@ -71,7 +71,7 @@ ${inboxText}
 }`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o", // Флагманская модель для эмоционального интеллекта
+    model: "gpt-6-luna", // Флагманская модель для эмоционального интеллекта
     messages: [{ role: "system", content: prompt }],
     response_format: { type: "json_object" }
   });

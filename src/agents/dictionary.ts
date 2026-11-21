@@ -27,10 +27,10 @@ export async function processNewWords(userId: bigint, text: string) {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-6.1-terra",
       messages: [{ role: "system", content: prompt }],
       response_format: { type: "json_object" },
-      temperature: 0.2
+
     });
 
     const result = JSON.parse(completion.choices[0]?.message?.content || '{"words":[]}');
@@ -80,9 +80,9 @@ export async function fixBrokenWords(userId: bigint) {
 
     try {
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-6.1-terra",
         messages: [{ role: "user", content: prompt }],
-        temperature: 0.2
+
       });
 
       const translation = completion.choices[0]?.message?.content?.trim();

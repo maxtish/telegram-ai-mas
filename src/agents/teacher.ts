@@ -42,7 +42,7 @@ export async function analyzeMistakes(userId: bigint) {
   try {
     // 4. Запрос к дешевой и быстрой модели
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-6.2-sol",
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: dialogText }
@@ -109,7 +109,7 @@ export async function startTeacherSession(userId: bigint): Promise<string> {
 }`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-6.2-sol",
     messages: [{ role: "system", content: prompt }],
     response_format: { type: "json_object" }
   });
@@ -241,7 +241,7 @@ ${nextTaskPrompt}
 
   // ОТПРАВЛЯЕМ В LLM
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
+    model: "gpt-6.2-sol",
     messages: messagesArray,
     response_format: { type: "json_object" }
   });
@@ -337,7 +337,7 @@ ${dialogText}
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o", // Дешевая и быстрая модель идеально подходит для саммаризации
+      model: "gpt-6.2-sol", // Дешевая и быстрая модель идеально подходит для саммаризации
       messages: [{ role: "system", content: prompt }]
     });
 

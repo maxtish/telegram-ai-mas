@@ -119,9 +119,9 @@ ${studyPrompt}
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o",
+      model: "gpt-6.2-sol",
       messages,
-      temperature: 0.7
+
     });
 
     const replyText = completion.choices[0]?.message?.content || "Alles klar!";

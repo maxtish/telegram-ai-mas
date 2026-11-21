@@ -50,10 +50,10 @@ export async function planDay(userId: bigint) {
 
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-6-luna",
       messages: [{ role: "system", content: prompt }],
       response_format: { type: "json_object" },
-      temperature: 0.8
+
     });
 
     const result = JSON.parse(completion.choices[0]?.message?.content || '{"events":[]}');

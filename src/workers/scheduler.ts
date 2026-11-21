@@ -138,9 +138,9 @@ ${chatHistory}`;
 
         try {
           const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
+            model: "gpt-6.2-sol",
             messages: [{ role: "system", content: prompt }],
-            temperature: 0.8
+
           });
 
           const replyText = completion.choices[0]?.message?.content;
@@ -212,7 +212,7 @@ ${chatHistory}`;
 Можешь использовать смешанный русско-немецкий или просто русский с немецкими словечками. Максимум 1-2 предложения. Но потом переходи на Немецкий! НЕ помогай ему с переводом, пусть сам думает!`;
 
       const completion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: "gpt-6.2-sol",
         messages: [{ role: "system", content: prompt }]
       });
 
@@ -263,7 +263,7 @@ ${timeInstruction}
 2. Не звучи как бот-помощник. Напиши это как сообщение в мессенджере другу (1-2 предложения, разговорный стиль).
 3. НЕ задавай вопрос в конце, если этого не требует контекст. Просто поделись мыслью.`;
 
-    const completion = await openai.chat.completions.create({ model: "gpt-4o-mini", messages: [{ role: "system", content: systemPrompt }] });
+    const completion = await openai.chat.completions.create({ model: "gpt-6.2-sol", messages: [{ role: "system", content: systemPrompt }] });
     const replyText = completion.choices[0]?.message?.content;
 
     if (replyText) {

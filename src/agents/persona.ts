@@ -6,9 +6,9 @@ const openai = new OpenAI({
 
 export async function generatePersona() {
   console.log("Генерируем новую личность...");
-  
+
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini", // Дешевая и быстрая модель, отлично подходит для задач форматирования
+    model: "gpt-6-luna", // Дешевая и быстрая модель, отлично подходит для задач форматирования
     messages: [
       {
         role: "system",

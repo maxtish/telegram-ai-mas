@@ -5,7 +5,7 @@ const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 // Интервалы повторений в часах (индекс массива = текущий score)
 // 0: через 10 минут, 1: 4 часа, 2: 24 часа, 3: 3 дня, 4: 7 дней, 5: выучено
-const intervalsHours = [1/6, 4, 24, 72, 168]; 
+const intervalsHours = [1 / 6, 4, 24, 72, 168];
 
 export async function checkWordQuiz(userId: bigint, wordId: number, userAnswer: string) {
   const word = await prisma.vocabulary.findUnique({ where: { id: wordId } });
@@ -33,7 +33,7 @@ export async function checkWordQuiz(userId: bigint, wordId: number, userAnswer: 
 }`;
 
   const completion = await openai.chat.completions.create({
-    model: "gpt-4o-mini",
+    model: "gpt-6-luna",
     messages: [{ role: "system", content: prompt }],
     response_format: { type: "json_object" }
   });
@@ -47,13 +47,13 @@ export async function checkWordQuiz(userId: bigint, wordId: number, userAnswer: 
     const nextScore = Math.min(word.score + 1, 5);
     const addHours = intervalsHours[nextScore - 1] || 720; // 1 месяц, если уже выучил
     const nextReview = new Date(Date.now() + addHours * 60 * 60 * 1000);
-    
+
     await prisma.vocabulary.update({
       where: { id: word.id },
       data: { score: nextScore, nextReview }
     });
-  } 
-  
+  }
+
   else if (result.status === 'wrong') {
     // Сбрасываем прогресс, повторим через 10 минут
     const nextReview = new Date(Date.now() + 10 * 60 * 1000);
@@ -61,8 +61,8 @@ export async function checkWordQuiz(userId: bigint, wordId: number, userAnswer: 
       where: { id: word.id },
       data: { score: 0, nextReview }
     });
-  } 
-  
+  }
+
   else if (result.status === 'typo') {
     // При опечатке даем второй шанс, оставляем состояние QUIZ
     newState = `QUIZ_${word.id}`;
