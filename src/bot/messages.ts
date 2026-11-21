@@ -314,9 +314,9 @@ export function setupMessageHandlers(bot: Telegraf) {
             await prisma.user.update({ where: { id: telegramId }, data: { botState: 'IDLE' } });
 
             if (addedWords.length > 0) {
-                return ctx.reply(`✅ Добавлено в словарь:\n\n${addedWords.join('\n')}\n\nБуду периодически спрашивать их перевод!`, Markup.keyboard([['📘 Добавить слова']]).resize());
+                return ctx.reply(`✅ Добавлено в словарь:\n\n${addedWords.join('\n')}\n\nБуду периодически спрашивать их перевод!`, mainMenu);
             } else {
-                return ctx.reply("Не нашел новых слов для добавления (возможно, они уже есть в словаре).", Markup.keyboard([['📘 Добавить слова']]).resize());
+                return ctx.reply("Не нашел новых слов для добавления (возможно, они уже есть в словаре).", mainMenu);
             }
         }
 

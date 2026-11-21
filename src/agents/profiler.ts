@@ -3,51 +3,63 @@ import prisma from '../database';
 
 const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-export async function analyzeUserProfile(userId: bigint, text: string) {
+export async function analyzeUserProfile(userId: bigint, messageText: string) {
     const user = await prisma.user.findUnique({ where: { id: userId } });
     if (!user) return;
 
-    const prompt = `Ты аналитик профиля. Прочитай сообщение пользователя и найди факты о нем.
-Его текущие данные в базе:
-Имя: ${user.realName || 'Неизвестно'}
-Интересы: ${user.interests.join(', ') || 'Пусто'}
-О себе: ${user.about || 'Пусто'}
+    const currentProfile = {
+        realName: user.realName || null,
+        interests: user.interests || [],
+        about: user.about || ""
+    };
 
-Сообщение пользователя: "${text}"
+    const prompt = `Ты — редактор долговременной памяти (досье) пользователя.
+Твоя задача: поддерживать досье в актуальном состоянии на основе нового сообщения.
 
-Есть ли в тексте новая информация о пользователе? (Его имя, хобби, работа, семья, предпочтения).
-Если ничего нового нет, верни hasNewFacts: false.
-Если есть, аккуратно обнови поля. Старые интересы НЕ удаляй, а дополняй.
+ТЕКУЩЕЕ ДОСЬЕ:
+${JSON.stringify(currentProfile, null, 2)}
+
+НОВОЕ СООБЩЕНИЕ ПОЛЬЗОВАТЕЛЯ:
+"${messageText}"
+
+ПРАВИЛА РЕДАКТИРОВАНИЯ:
+1. УДАЛЕНИЕ УСТАРЕВШЕГО: Если новое сообщение отменяет или исправляет старый факт (например, в досье написано "болеет / болит голова", а пользователь пишет "я выздоровел", "уже лучше", "всё прошло") — ОБЯЗАТЕЛЬНО удали устаревший факт из поля "about".
+2. ФИЛЬТР ВРЕМЕННОГО: НЕ записывай в досье разовые и сиюминутные состояния ("болит голова", "устал сегодня", "иду в магазин", "пью кофе"). В "about" хранятся только долгосрочные факты (работа, семья, город, техника, важные проекты).
+3. ОБНОВЛЕНИЕ: Если появились новые долгосрочные факты или хобби — аккуратно впиши их. Если изменилась работа, город или статус — замени старое на новое, не дублируй.
+4. ЧИСТОТА: Поле "about" должно быть коротким (до 3-4 предложений), без воды и повторов.
+5. Если в сообщении нет ничего, что требует менять досье — верни "hasChanges": false.
 
 Верни СТРОГО JSON:
 {
-  "hasNewFacts": true | false,
-  "realName": "Имя пользователя (если назвал)",
-  "interests": ["список", "всех", "интересов", "с учетом", "новых"],
-  "about": "Краткая выжимка фактов о пользователе (например: Работает механиком, есть сын, любит программировать)"
+  "hasChanges": boolean,
+  "realName": string | null,
+  "interests": string[],
+  "about": string
 }`;
 
     try {
         const completion = await openai.chat.completions.create({
-            model: "gpt-4o-mini", // Дешевая модель идеально справится с парсингом
+            model: "gpt-4o-mini",
             messages: [{ role: "system", content: prompt }],
-            response_format: { type: "json_object" }
+            response_format: { type: "json_object" },
+            temperature: 0.1
         });
 
-        const data = JSON.parse(completion.choices[0]?.message?.content || '{"hasNewFacts":false}');
+        const data = JSON.parse(completion.choices[0]?.message?.content || '{"hasChanges": false}');
 
-        if (data.hasNewFacts) {
-            await prisma.user.update({
-                where: { id: userId },
-                data: {
-                    realName: data.realName || user.realName,
-                    interests: data.interests || user.interests,
-                    about: data.about || user.about
-                }
-            });
-            console.log(`[Profiler] Обновлено досье пользователя ${userId}`);
-        }
+        if (!data.hasChanges) return;
+
+        await prisma.user.update({
+            where: { id: userId },
+            data: {
+                realName: data.realName ?? user.realName,
+                interests: Array.isArray(data.interests) ? data.interests : user.interests,
+                about: typeof data.about === 'string' ? data.about : user.about
+            }
+        });
+
+        console.log(`[Profiler] Досье пользователя ${userId} обновлено/исправлено.`);
     } catch (error) {
-        console.error("[Profiler] Ошибка:", error);
+        console.error("[Profiler] Ошибка обновления профиля:", error);
     }
 }

@@ -87,15 +87,15 @@ const worker = new Worker('message-queue', async (job) => {
   }
   // ------------------------------------------
 
-  // --- НОВОЕ: ПИНГ НЕАКТИВНОСТИ (Прошло 5 часов без ответа) ---
+
+  // --- ПИНГ НЕАКТИВНОСТИ (Прошло 5+ часов без общения) ---
   if (type === 'inactivity-ping') {
     console.log(`[Ping] Проверяю чаты на долгое молчание...`);
     const users = await prisma.user.findMany({ include: { persona: true } });
 
     for (const u of users) {
-      if (u.botState !== 'IDLE' || !u.persona) continue; // Не трогаем, если юзер на экзамене
+      if (u.botState !== 'IDLE' || !u.persona) continue;
 
-      // Берем последние 10 сообщений для контекста
       const recentMessages = await prisma.message.findMany({
         where: { userId: u.id },
         orderBy: { createdAt: 'desc' },
@@ -105,47 +105,45 @@ const worker = new Worker('message-queue', async (job) => {
       if (recentMessages.length === 0) continue;
 
       const lastMsg = recentMessages[0];
-
-      // Нас интересует только ситуация, когда ПОСЛЕДНИМ написал БОТ, а юзер молчит
-      if (lastMsg.sender !== 'BOT') continue;
-
       const hoursPassed = (Date.now() - lastMsg.createdAt.getTime()) / (1000 * 60 * 60);
 
-      // Ловим окно ровно между 5 и 6 часами молчания, чтобы бот написал ровно 1 раз, а не спамил каждый час
-      if (hoursPassed >= 5 && hoursPassed < 6) {
-        console.log(`[Ping] Пользователь ${u.id} молчит 5 часов. Генерируем вовлекающее сообщение.`);
+      // Ловим окно 5–6 часов ИЛИ первое срабатывание утром (если молчали больше 10 часов)
+      const isDaytimeGap = hoursPassed >= 5 && hoursPassed < 6;
+      const isAfterNightGap = hoursPassed >= 10 && hoursPassed < 11;
 
-        // Собираем историю диалога для анализа
-        const chatHistory = recentMessages.reverse().map(m => `${m.sender === 'BOT' ? u.persona?.name : 'Пользователь'}: ${m.content}`).join('\n');
+      if (isDaytimeGap || isAfterNightGap) {
+        console.log(`[Ping] Пользователь ${u.id} молчит ${hoursPassed.toFixed(1)} ч. Генерируем пинг.`);
 
-        const prompt = `Ты человек из Германии (Бавария). Имя: ${u.persona.name}, профессия: ${u.persona.profession}.
-Твой собеседник не отвечает на твое последнее сообщение уже 5 часов. 
+        const chatHistory = recentMessages
+          .reverse()
+          .map(m => `${m.sender === 'BOT' ? u.persona?.name : 'Пользователь'}: ${m.content}`)
+          .join('\n');
 
-ТВОЯ ЗАДАЧА:
-Написать ОДНО короткое сообщение (2-3 предложения), чтобы сменить тему и снова вовлечь его в разговор.
-Сделай анализ истории переписки, чтобы понять, чем он увлекается (хобби, работа, интересы).
+        const userInterests = u.interests.length > 0 ? u.interests.join(', ') : 'технологии и повседневная жизнь';
+        const topicHint = u.learningTopic ? `Сейчас изучает тему: "${u.learningTopic}".` : '';
 
-Выбери ОДИН из вариантов:
-1. Поделись коротким интересным фактом из мира IT, технологий или инженерии.
-2. Расскажи забавный факт или новость о Баварии/Германии.
-3. Задай вопрос о его хобби, которое упоминалось в чате.
+        const prompt = `Ты реальный человек из Германии (${u.persona.city}). Имя: ${u.persona.name}, профессия: ${u.persona.profession}.
+Вы не общались уже несколько часов. Интересы собеседника: ${userInterests}. ${topicHint}
 
-ПРАВИЛА:
-- Не упрекай его за то, что он долго не отвечал.
-- Пиши на немецком языке (можно добавить 1-2 слова по-русски, если это уместно для юмора).
-- Будь дружелюбным и естественным.
+ЗАДАЧА:
+Напиши ОДНО короткое живое сообщение на немецком (1-2 предложения), чтобы снова вовлечь его в разговор.
+Зацепись за один из его интересов или тему обучения, либо поделись короткой мыслью/вопросом.
 
-История последних сообщений для анализа:
+ЗАПРЕЩЕНО:
+- Упрекать за молчание.
+- Писать банальности про погоду, "как спалось" или "пью кофе".
+
+История последних сообщений:
 ${chatHistory}`;
 
         try {
           const completion = await openai.chat.completions.create({
             model: "gpt-4o-mini",
-            messages: [{ role: "system", content: prompt }]
+            messages: [{ role: "system", content: prompt }],
+            temperature: 0.8
           });
 
           const replyText = completion.choices[0]?.message?.content;
-
           if (replyText) {
             await prisma.message.create({ data: { userId: u.id, sender: 'BOT', content: replyText } });
             await bot.telegram.sendMessage(Number(u.id), replyText);
@@ -155,7 +153,7 @@ ${chatHistory}`;
         }
       }
     }
-    return; // Завершаем задачу
+    return;
   }
   // -------------------------------------------------------------
 
@@ -172,12 +170,12 @@ ${chatHistory}`;
     console.log(`[Dispatcher] Решение: ${decision.action}. Причина: ${decision.reason}`);
 
     if (decision.action === 'reply_now') {
-      const replyText = await generateReply(userId, decision.useVoice);
+      const replyText = await generateReply(userBigInt, decision.useVoice);
 
       // 1. Сохраняем в БД как обычный текст (история и контекст не ломаются)
-      await prisma.message.create({ data: { userId, sender: 'BOT', content: replyText } });
+      await prisma.message.create({ data: { userId: userBigInt, sender: 'BOT', content: replyText } });
 
-      const user = await prisma.user.findUnique({ where: { id: userId }, include: { persona: true } });
+      const user = await prisma.user.findUnique({ where: { id: userBigInt }, include: { persona: true } });
 
       // 2. ПЕРЕХВАТЧИК: Диспетчер сказал использовать голос?
       if (decision.useVoice && user?.persona) {
@@ -245,7 +243,7 @@ ${chatHistory}`;
   else if (type === 'proactive-message') {
     console.log(`[Worker] Инициатива для ${userId}. Событие: ${context}`);
     const user = await prisma.user.findUnique({ where: { id: userBigInt }, include: { persona: true } });
-    if (!user || !user.persona) return;
+    if (!user || !user.persona || user.botState !== 'IDLE') return;
 
     const recentMessages = await prisma.message.findMany({ where: { userId: user.id }, orderBy: { createdAt: 'desc' }, take: 2 });
     let timeInstruction = "Вы еще не общались сегодня. Начни с приветствия.";
